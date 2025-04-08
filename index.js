@@ -153,31 +153,57 @@ builder.defineStreamHandler(async (args) => {
 
   if (type === 'movie' && id.startsWith('greekmovies_')) {
     const realLink = id.replace('greekmovies_', '');
-    // ή αν χρειάζεται domain:
-    // const fullLink = 'https://greek-movies.com' + realLink;
+
+    // Σημείωση: αν το realLink είναι σχετικό (πχ "/m/123"), πρόσθεσε το domain
+    // πχ: const fullLink = 'https://greek-movies.com' + realLink;
+    const fullLink = realLink.startsWith('http') 
+      ? realLink
+      : 'https://greek-movies.com' + realLink;
 
     try {
-      console.log('[StreamHandler] Getting link:', realLink);
-      const response = await axios.get(realLink);
+      console.log('[StreamHandler] Fetching link:', fullLink);
+      const response = await axios.get(fullLink);
       const html = response.data;
       const $ = cheerio.load(html);
 
-      // Παράδειγμα: ψάχνουμε <iframe> για το βίντεο
-      const iframeSrc = $('iframe').attr('src') || '';
-
+      // Φτιάχνουμε ένα array για όλα τα streams
       const streams = [];
+
+      // 1) ΠΑΡΑΔΕΙΓΜΑ: Αν τα κουμπιά είναι <a class="btn btn-primary" ...>
+      //    και το κείμενό τους γράφει "προβολή σε ..."
+      $('a.btn.btn-primary').each((i, elem) => {
+        const text = $(elem).text().trim();   // π.χ. "προβολή σε dropLoad"
+        const link = $(elem).attr('href') || '';
+
+        // Αν θες, μπορείς να φιλτράρεις ανάλογα με το text
+        // π.χ. μόνο αν περιέχει "προβολή σε"
+        if (text.toLowerCase().includes('προβολή σε') && link) {
+          // Προσθέτουμε αυτό το link ως ξεχωριστό stream
+          streams.push({
+            name: text,     // π.χ. "προβολή σε dropLoad"
+            title: text,    // το ίδιο
+            url: link,      // αυτό το link μάλλον θα ανοίγει σε browser
+            isFree: true
+          });
+        }
+      });
+
+      // 2) ΠΑΡΑΔΕΙΓΜΑ: Αν παράλληλα υπάρχει κάποιο <iframe> με απευθείας αναπαραγωγή:
+      const iframeSrc = $('iframe').attr('src') || '';
       if (iframeSrc) {
-        // Ένα μόνο stream
         streams.push({
-          name: 'Greek Movies Stream',
-          title: 'Greek Movies Stream',
+          name: 'Embedded Iframe',
+          title: 'Embedded Iframe',
           url: iframeSrc,
           isFree: true
         });
       }
+
+      // Επιστρέφουμε όλα τα streams που βρήκαμε
       return { streams };
+
     } catch (err) {
-      console.error('[StreamHandler] Σφάλμα στο axios.get:', err.message);
+      console.error('[StreamHandler] Σφάλμα στο axios:', err.message);
       return { streams: [] };
     }
   }
