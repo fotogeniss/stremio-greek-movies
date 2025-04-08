@@ -39,11 +39,8 @@ const builder = new addonBuilder(manifest);
 //    Διαβάζει https://greek-movies.com/movies.php και επιστρέφει όλες τις ταινίες
 ////////////////////////////////////////////////////////////////////////////////
 builder.defineCatalogHandler(async (args) => {
-  const { id, type } = args;
-  console.log('[CatalogHandler] Request:', args);
-
-  // Ελέγχουμε αν ζητάει το σωστό catalog
-  if (type === 'movie' && id === 'all_greek_movies') {
+  const { type, id } = args;
+  if (type === 'movie' && id === 'greekmovies_catalog') {
     const results = [];
 
     try {
