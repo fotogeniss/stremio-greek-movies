@@ -3,21 +3,18 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const express = require('express');
 
-////////////////////////////////////////////////////////////////////////////////
-// 1) MANIFEST
-////////////////////////////////////////////////////////////////////////////////
 const manifest = {
   id: 'org.my.greekmovies',
   version: '1.0.0',
-  name: 'Greek Movies Add-on',
-  description: 'Αναζητά ταινίες από το greek-movies.com και παρέχει streams',
-  logo: 'https://greek-movies.com/img/logo.png', // ή κάποιο δικό σου
+  name: 'Greek Movies (movies.php) Add-on',
+  description: 'Παράδειγμα add-on που διαβάζει από το greek-movies.com/movies.php',
+  logo: 'https://greek-movies.com/img/logo.png',
   catalogs: [
     {
       type: 'movie',
-      id: 'greekmovies_catalog',
-      name: 'Greek Movies',
-      extra: [{ name: 'search' }]
+      id: 'all_greek_movies',
+      name: 'Greek Movies List',
+      // Αν θες απλώς λίστα χωρίς search, δεν χρειάζεται [{ name: 'search' }]
     }
   ],
   resources: [
@@ -29,74 +26,60 @@ const manifest = {
   idPrefixes: ['greekmovies_']
 };
 
-////////////////////////////////////////////////////////////////////////////////
-// 2) ΔΗΜΙΟΥΡΓΙΑ ADDON BUILDER
-////////////////////////////////////////////////////////////////////////////////
 const builder = new addonBuilder(manifest);
 
-////////////////////////////////////////////////////////////////////////////////
-// 3) CATALOG HANDLER
-////////////////////////////////////////////////////////////////////////////////
+// 1) Catalog που διαβάζει ΑΠΛΑ όλα τα movies από το movies.php (χωρίς search)
 builder.defineCatalogHandler(async (args) => {
-  const { id, type, extra } = args;
-  const results = [];
+  const { type, id } = args;
+  console.log('[CatalogHandler] Request:', args);
 
-  console.log('[CatalogHandler] Incoming request:', args);
+  // Σιγουρευόμαστε ότι ζητάει movie & το δικό μας catalog ID
+  if (type === 'movie' && id === 'all_greek_movies') {
+    const results = [];
 
-  // Μόνο αν είναι type=movie και id=greekmovies_catalog
-  if (type === 'movie' && id === 'greekmovies_catalog') {
-    const searchQuery = extra.search;
-    if (searchQuery) {
-      // Φτιάχνουμε το URL αναζήτησης
-      const searchUrl = `https://greek-movies.com/search?q=${encodeURIComponent(searchQuery)}`;
-      console.log(`[CatalogHandler] Αναζήτηση για: "${searchQuery}" -> ${searchUrl}`);
+    try {
+      const url = 'https://greek-movies.com/movies.php';
+      console.log('[CatalogHandler] Fetching:', url);
+      const response = await axios.get(url);
+      const html = response.data;
+      const $ = cheerio.load(html);
 
-      try {
-        const response = await axios.get(searchUrl);
-        const html = response.data;
-        const $ = cheerio.load(html);
+      // Τώρα προσαρμόζεις το selector με βάση το πώς εμφανίζονται τα στοιχεία
+      $('div.movie-item').each((i, elem) => {
+        const title = $(elem).find('.title').text().trim() || 'Χωρίς τίτλο';
+        const link = $(elem).find('a').attr('href') || '';
+        const poster = $(elem).find('img').attr('src') || '';
 
-        // Προσαρμόζεις τους selectors ανάλογα με την ιστοσελίδα
-        $('.movie-item').each((i, elem) => {
-          const title = $(elem).find('.title').text().trim() || 'Χωρίς τίτλο';
-          const link = $(elem).find('a').attr('href') || '';
-          const poster = $(elem).find('img').attr('src') || '';
+        // Φτιάχνουμε ένα ID που ξεκινά με 'greekmovies_'
+        if (link) {
+          const movieId = 'greekmovies_' + link;
+          results.push({
+            id: movieId,
+            type: 'movie',
+            name: title,
+            poster: poster
+          });
+        }
+      });
 
-          // Δες τι επιστρέφει για debug
-          console.log(`[CatalogHandler] Found: title="${title}", link="${link}"`);
-
-          if (link) {
-            const movieId = 'greekmovies_' + link;
-            results.push({
-              id: movieId,
-              type: 'movie',
-              name: title,
-              poster: poster
-            });
-          }
-        });
-
-      } catch (err) {
-        // Αν κάτι πάει στραβά (π.χ. 403, 404, network error), το logάρουμε.
-        console.error('[CatalogHandler] Σφάλμα στο axios.get(searchUrl):', err.message);
-      }
+      console.log('[CatalogHandler] Βρέθηκαν:', results.length, 'ταινίες');
+      return { metas: results };
+    } catch (err) {
+      console.error('[CatalogHandler] Σφάλμα:', err.message);
+      // Αν αποτύχει το scraping, γυρνάμε άδειο
+      return { metas: [] };
     }
   }
 
-  // Επιστρέφουμε το array με metas
-  return {
-    metas: results
-  };
+  // Default empty
+  return { metas: [] };
 });
 
-////////////////////////////////////////////////////////////////////////////////
-// 4) META HANDLER
-////////////////////////////////////////////////////////////////////////////////
+// 2) Meta Handler
 builder.defineMetaHandler(async (args) => {
   const { type, id } = args;
-  console.log('[MetaHandler] Incoming request:', args);
+  console.log('[MetaHandler] Request:', args);
 
-  // Ελέγχουμε αν το ID ξεκινά με 'greekmovies_'
   if (type === 'movie' && id.startsWith('greekmovies_')) {
     const realLink = id.replace('greekmovies_', '');
     console.log('[MetaHandler] Real link is:', realLink);
@@ -106,12 +89,10 @@ builder.defineMetaHandler(async (args) => {
       const html = response.data;
       const $ = cheerio.load(html);
 
-      // Προσαρμόζεις τους selectors
+      // Παράδειγμα, βρίσκουμε τον τίτλο, πόστερ και περιγραφή
       const title = $('h1').text().trim() || 'Χωρίς τίτλο';
       const poster = $('img.poster-class').attr('src') || '';
       const description = $('div.synopsis').text().trim() || '';
-
-      console.log(`[MetaHandler] Fetched title="${title}"`);
 
       const meta = {
         id,
@@ -119,26 +100,22 @@ builder.defineMetaHandler(async (args) => {
         name: title,
         poster,
         description
-        // Μπορείς να προσθέσεις κι άλλα πεδία (director, cast, releaseInfo κλπ.)
       };
 
       return { meta };
     } catch (err) {
-      console.error('[MetaHandler] Σφάλμα στο axios.get(realLink):', err.message);
+      console.error('[MetaHandler] Σφάλμα:', err.message);
       return { meta: {} };
     }
   }
 
-  // Αν δεν ταιριάζει στο πρότυπο, γυρίζουμε κενό
   return { meta: {} };
 });
 
-////////////////////////////////////////////////////////////////////////////////
-// 5) STREAM HANDLER
-////////////////////////////////////////////////////////////////////////////////
+// 3) Stream Handler
 builder.defineStreamHandler(async (args) => {
   const { type, id } = args;
-  console.log('[StreamHandler] Incoming request:', args);
+  console.log('[StreamHandler] Request:', args);
 
   if (type === 'movie' && id.startsWith('greekmovies_')) {
     const realLink = id.replace('greekmovies_', '');
@@ -149,10 +126,8 @@ builder.defineStreamHandler(async (args) => {
       const html = response.data;
       const $ = cheerio.load(html);
 
-      // Βρες το iframe ή το video src
+      // Παράδειγμα, βρίσκεις iframe
       const iframeSrc = $('iframe').attr('src') || '';
-
-      console.log(`[StreamHandler] iframeSrc = "${iframeSrc}"`);
 
       const streams = [];
       if (iframeSrc) {
@@ -165,7 +140,7 @@ builder.defineStreamHandler(async (args) => {
       }
       return { streams };
     } catch (err) {
-      console.error('[StreamHandler] Σφάλμα στο axios.get(realLink):', err.message);
+      console.error('[StreamHandler] Σφάλμα:', err.message);
       return { streams: [] };
     }
   }
@@ -173,9 +148,7 @@ builder.defineStreamHandler(async (args) => {
   return { streams: [] };
 });
 
-////////////////////////////////////////////////////////////////////////////////
-// 6) ΣΤΗΝΟΥΜΕ ΤΟ ADDON ΣΕ EXPRESS SERVER
-////////////////////////////////////////////////////////////////////////////////
+// 4) Express Server
 const addonInterface = builder.getInterface();
 const addonRouter = getRouter(addonInterface);
 
@@ -185,4 +158,5 @@ app.use('/', addonRouter);
 const PORT = process.env.PORT || 7000;
 app.listen(PORT, () => {
   console.log(`✅ Greek Movies Addon running on http://localhost:${PORT}`);
+  console.log(`Manifest: http://localhost:${PORT}/manifest.json`);
 });
